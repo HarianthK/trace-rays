@@ -1,6 +1,8 @@
 # A ray tracer: spheres, a checkered floor, shadows, reflections, writing its own PNG.
-# Run: python raytracer.py [-o out.png] [-w 640] [-s 2]. DOCS.md explains the maths.
+# Run: python raytracer.py [-o out.png] [-w 640] [-s 2] [-p processes]. DOCS.md explains the maths.
 import math
+import multiprocessing
+import os
 import struct
 import sys
 import zlib
@@ -113,37 +115,46 @@ def shade(origin, direction, depth=0):
     return colour
 
 
-def render(width=480, height=270, samples=2):
+def camera(width, height):
     # Off to one side, so the checker boundary at x=0 does not split the picture down the middle.
     eye = (0.8, 0.75, 1.4)
     target = (-0.1, 0.1, -2.1)
     forward = unit(sub(target, eye))
     right = unit(cross(forward, (0.0, 1.0, 0.0)))
     up = cross(right, forward)
-    fov = math.radians(55)
-    half_w = math.tan(fov / 2)
-    half_h = half_w * height / width
+    half_w = math.tan(math.radians(55) / 2)
+    return eye, forward, right, up, half_w, half_w * height / width
 
-    rows = []
-    for y in range(height):
-        row = bytearray()
-        for x in range(width):
-            total = BLACK
-            for sy in range(samples):
-                for sx in range(samples):
-                    # Sample the pixel on a grid, which is what removes the jagged edges.
-                    u = (2 * ((x + (sx + 0.5) / samples) / width) - 1) * half_w
-                    v = (1 - 2 * ((y + (sy + 0.5) / samples) / height)) * half_h
-                    direction = unit(add(forward, add(mul(right, u), mul(up, v))))
-                    total = add(total, shade(eye, direction))
-            n = samples * samples
-            for channel in mul(total, 1.0 / n):
-                # sRGB gamma, without which everything looks too dark.
-                row.append(min(255, max(0, round(255 * min(1.0, channel) ** (1 / 2.2)))))
-        rows.append(bytes(row))
-        if y % 30 == 0:
-            print(f"  row {y}/{height}", file=sys.stderr)
-    return rows
+
+def render_row(job):
+    y, width, height, samples = job
+    eye, forward, right, up, half_w, half_h = camera(width, height)
+    row = bytearray()
+    for x in range(width):
+        total = BLACK
+        for sy in range(samples):
+            for sx in range(samples):
+                # Sample the pixel on a grid, which is what removes the jagged edges.
+                u = (2 * ((x + (sx + 0.5) / samples) / width) - 1) * half_w
+                v = (1 - 2 * ((y + (sy + 0.5) / samples) / height)) * half_h
+                direction = unit(add(forward, add(mul(right, u), mul(up, v))))
+                total = add(total, shade(eye, direction))
+        n = samples * samples
+        for channel in mul(total, 1.0 / n):
+            # sRGB gamma, without which everything looks too dark.
+            row.append(min(255, max(0, round(255 * min(1.0, channel) ** (1 / 2.2)))))
+    return bytes(row)
+
+
+def render(width=480, height=270, samples=2, processes=None):
+    # No pixel depends on another, so rows can be drawn in any order on any core. One
+    # core is left free by default, so the machine stays usable while it renders.
+    jobs = [(y, width, height, samples) for y in range(height)]
+    processes = processes or max(1, (os.cpu_count() or 2) - 1)
+    if processes == 1:
+        return [render_row(job) for job in jobs]
+    with multiprocessing.Pool(processes) as pool:
+        return pool.map(render_row, jobs, chunksize=max(1, height // (processes * 8)))
 
 
 def png(rows, width, height):
@@ -162,7 +173,8 @@ if __name__ == "__main__":
     out = argv[argv.index("-o") + 1] if "-o" in argv else "render.png"
     width = int(argv[argv.index("-w") + 1]) if "-w" in argv else 480
     samples = int(argv[argv.index("-s") + 1]) if "-s" in argv else 2
+    processes = int(argv[argv.index("-p") + 1]) if "-p" in argv else None
     height = round(width * 9 / 16)
-    rows = render(width, height, samples)
+    rows = render(width, height, samples, processes)
     open(out, "wb").write(png(rows, width, height))
     print(f"{out}: {width}x{height}, {samples * samples} samples per pixel")

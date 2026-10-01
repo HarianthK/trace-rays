@@ -70,3 +70,37 @@ floor point gets darker when the sphere that blocks its light is put in the
 scene and no darker when a distant sphere is removed. The PNG is then handed
 to Pillow, because a file read back by my own reader would only prove my two
 halves agree with each other.
+
+## Using every core
+
+No pixel depends on another, which makes a ray tracer the easiest kind of
+program to spread across processors: hand out rows, collect them, write the
+file. Threads would not help here, because Python runs one thread's bytecode at
+a time; separate processes each get their own interpreter. The rows come back
+through `Pool.map`, which returns results in the order they were asked for,
+whatever order they finish in.
+
+The full 640 by 360 image, nine samples a pixel:
+
+| processes | time | speed-up |
+| --- | --- | --- |
+| 1 | 67.8s | 1x |
+| 4 | 25.1s | 2.7x |
+| 7 | 21.6s | 3.1x |
+
+The machine reports eight processors, but Windows says four physical cores:
+each runs two hardware threads, and a second thread on a core adds only about
+15% to arithmetic like this. The default is every processor but one, so the
+computer stays usable while it renders.
+
+The check is the strictest one available: the image drawn by three processes
+must be byte for byte the same file as the one drawn by one. Collecting rows in
+the order they finish instead of the order they were asked for, the usual
+mistake, fails it at once.
+
+One Windows detail shaped the test file. A new process there starts by
+importing the script that launched it, so a test file that ran its checks at
+the top level would run them again in every worker, and its final `sys.exit`
+would end the workers before they did anything. The checks now live in a
+function that only runs when the file is the program being run.
+

@@ -104,3 +104,30 @@ the top level would run them again in every worker, and its final `sys.exit`
 would end the workers before they did anything. The checks now live in a
 function that only runs when the file is the program being run.
 
+## Glass is the same question asked twice more
+
+A glass surface sends every ray on in two directions: some of it reflects, and
+the rest bends through by Snell's law, n1 sin(a) = n2 sin(b). Both rays are
+followed, and their colours are mixed by how much light each carries. Glass has
+no colour of its own; it is only ever what it reflects plus what shows through.
+
+The direction of travel matters in three places, and each was a bug the tests
+caught when put back. On the way out the ratio of indices flips, 1.5 instead of
+1/1.5. The surface normal must be turned to face the ray, or Snell's formula
+bends the ray the wrong way. And going from glass to air past about 41.8
+degrees, the formula asks for the square root of a negative number: no light
+gets out at all, which is total internal reflection and the reason a glass ball
+has a bright rim.
+
+How much reflects comes from Schlick's approximation, 4% head on rising to all
+of it at a grazing angle. The angle it wants is the one on the air side. Using
+the angle inside the glass on the way out gives 4% just short of the critical
+angle, so the light would drop from 96% transmitted to none in a single step.
+The first version of the tests missed that and passed with it broken; a check
+just under the critical angle now catches it.
+
+The ball also turns the floor behind it upside down, as a real lens does, which
+nobody wrote any code for. The shadow is a shortcut: glass lets 60% of the
+light through without the shadow ray looking any further, so there are no
+caustics, the bright spot real glass focuses onto the floor. Following light
+from the lamp, rather than back from the eye, is what that would take.

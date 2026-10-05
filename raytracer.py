@@ -1,4 +1,4 @@
-# A ray tracer: spheres, a checkered floor, shadows, reflections, writing its own PNG.
+# A ray tracer: spheres, glass, a checkered floor, shadows, reflections, writing its own PNG.
 # Run: python raytracer.py [-o out.png] [-w 640] [-s 2] [-p processes]. DOCS.md explains the maths.
 import math
 import multiprocessing
@@ -23,9 +23,37 @@ def unit(a):
     return (a[0] / n, a[1] / n, a[2] / n)
 
 
+def refract(direction, normal, eta):
+    # Snell's law, with the normal facing the incoming ray and eta = n1 / n2. None means
+    # total internal reflection: the angle is too steep for any light to get out.
+    cos_i = -dot(direction, normal)
+    k = 1 - eta * eta * (1 - cos_i * cos_i)
+    if k < 0:
+        return None
+    return add(mul(direction, eta), mul(normal, eta * cos_i - math.sqrt(k)))
+
+
+def glass(point, direction, normal, ior):
+    # The rays a glass surface sends on, each with its share of the light: a reflection,
+    # and unless the angle is too steep, the rest bent through.
+    entering = dot(direction, normal) < 0
+    n = normal if entering else mul(normal, -1)
+    bounce = unit(sub(direction, mul(n, 2 * dot(direction, n))))
+    reflected = (add(point, mul(n, 1e-3)), bounce)
+    bent = refract(direction, n, 1 / ior if entering else ior)
+    if bent is None:
+        return [(1.0, *reflected)]
+    # Schlick's approximation of how much reflects, from the angle on the air side.
+    cos = -dot(direction if entering else bent, n)
+    r0 = ((ior - 1) / (ior + 1)) ** 2
+    r = r0 + (1 - r0) * (1 - cos) ** 5
+    return [(r, *reflected), (1 - r, add(point, mul(n, -1e-3)), unit(bent))]
+
+
 class Sphere:
-    def __init__(self, centre, radius, colour, reflect=0.0):
+    def __init__(self, centre, radius, colour, reflect=0.0, ior=None):
         self.centre, self.radius, self.colour, self.reflect = centre, radius, colour, reflect
+        self.ior = ior  # index of refraction; set, the sphere is clear glass
 
     def hit(self, origin, direction):
         # |origin + t*direction - centre| = radius, solved as a quadratic in t.
@@ -49,6 +77,8 @@ class Sphere:
 
 
 class Plane:
+    ior = None
+
     def __init__(self, height, colours, reflect=0.0):
         self.height, self.colours, self.reflect = height, colours, reflect
 
@@ -72,6 +102,7 @@ SCENE = [
     Sphere((0.0, 0.3, -2.4), 0.8, (0.85, 0.25, 0.25), reflect=0.35),
     Sphere((-1.35, -0.05, -1.9), 0.45, (0.25, 0.55, 0.85), reflect=0.1),
     Sphere((1.25, 0.0, -2.0), 0.5, (0.95, 0.80, 0.30), reflect=0.6),
+    Sphere((0.35, -0.15, -1.1), 0.35, BLACK, ior=1.5),
 ]
 LIGHT = (-2.2, 3.0, 0.4)
 AMBIENT = 0.12
@@ -99,14 +130,25 @@ def shade(origin, direction, depth=0):
 
     # A shadow is the same question again: does anything block the way to the light?
     shadow_t, blocker = nearest(add(point, mul(normal, 1e-3)), to_light)
-    lit = 0.0 if blocker is not None and shadow_t < length(sub(LIGHT, point)) else max(0.0, dot(normal, to_light))
+    lit = max(0.0, dot(normal, to_light))
+    if blocker is not None and shadow_t < length(sub(LIGHT, point)):
+        # ponytail: glass lets 60% through without looking past it, so no caustics and no
+        # second blocker behind it; trace the shadow ray onward if that ever shows.
+        lit *= 0.6 if blocker.ior else 0.0
 
-    base = obj.colour_at(point)
-    colour = mul(base, AMBIENT + lit)
-    if lit > 0:
-        # Specular highlight: how closely the reflected light points back at us.
-        half = unit(add(to_light, mul(direction, -1)))
-        colour = add(colour, mul((1.0, 1.0, 1.0), 0.4 * max(0.0, dot(normal, half)) ** 48))
+    # Specular highlight: how closely the reflected light points back at us.
+    half = unit(add(to_light, mul(direction, -1)))
+    highlight = mul((1.0, 1.0, 1.0), 0.4 * max(0.0, dot(normal, half)) ** 48) if lit > 0 else BLACK
+
+    if obj.ior:
+        # Glass has no colour of its own: it is what it reflects plus what shows through it.
+        colour = highlight
+        if depth < 6:
+            for weight, start, way in glass(point, direction, normal, obj.ior):
+                colour = add(colour, mul(shade(start, way, depth + 1), weight))
+        return colour
+
+    colour = add(mul(obj.colour_at(point), AMBIENT + lit), highlight)
 
     if obj.reflect > 0 and depth < 4:
         bounce = sub(direction, mul(normal, 2 * dot(direction, normal)))

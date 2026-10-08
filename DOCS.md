@@ -127,7 +127,15 @@ The first version of the tests missed that and passed with it broken; a check
 just under the critical angle now catches it.
 
 The ball also turns the floor behind it upside down, as a real lens does, which
-nobody wrote any code for. The shadow is a shortcut: glass lets 60% of the
-light through without the shadow ray looking any further, so there are no
-caustics, the bright spot real glass focuses onto the floor. Following light
-from the lamp, rather than back from the eye, is what that would take.
+nobody wrote any code for.
+
+The shadow was a shortcut at first: the shadow ray stopped at the first thing
+in its way, and if that was glass it let 60% of the light through. A solid ball
+behind the glass, between it and the lamp, would then cast no shadow at all.
+Now the shadow ray goes on past glass, charging 60% once per ball, on the way
+in, and stops at the first solid thing. Two glass balls in a row pass 36%. The
+rendered scene came out pixel for pixel the same, since nothing in it sits
+behind the glass, which is exactly why the shortcut had gone unnoticed; the
+test adds a ball there to see it. What is still missing is caustics, the
+bright spot real glass focuses onto the floor, which would mean following
+light from the lamp rather than back from the eye.

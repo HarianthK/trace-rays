@@ -97,6 +97,20 @@ def main():
     unshaded = floor_brightness(under_glass)
     rt.SCENE.append(ball)
     assert 0.3 * unshaded < shaded < 0.95 * unshaded, (shaded, unshaded)
+    # A solid ball further along the same line, between the glass and the light: the glass
+    # no longer decides alone, and the floor is as dark as under any solid shadow.
+    behind = rt.Sphere((-0.67, 1.11, -0.5), 0.2, (0.5, 0.5, 0.5))
+    rt.SCENE.append(behind)
+    both = floor_brightness(under_glass)
+    rt.SCENE.remove(behind)
+    assert both < 0.5 * shaded, (both, shaded)
+    # Two glass balls in a row let through 0.6 of 0.6, not 0.6 once.
+    second = rt.Sphere((-0.67, 1.11, -0.5), 0.2, rt.BLACK, ior=1.5)
+    assert abs(rt.light_reaching((0.633, -0.5, -1.267), rt.unit(rt.sub(rt.LIGHT, (0.633, -0.5, -1.267)))) - 0.6) < 1e-9
+    rt.SCENE.append(second)
+    twice = rt.light_reaching((0.633, -0.5, -1.267), rt.unit(rt.sub(rt.LIGHT, (0.633, -0.5, -1.267))))
+    rt.SCENE.remove(second)
+    assert abs(twice - 0.36) < 1e-9, twice
 
     # The PNG: render something tiny, then let Pillow tell us what we wrote.
     rows = rt.render(48, 27, samples=1, processes=1)

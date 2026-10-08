@@ -117,6 +117,24 @@ def nearest(origin, direction):
     return best_t, best_obj
 
 
+def light_reaching(point, to_light):
+    # A shadow is the same question again: what is in the way to the light? Glass passes 60%
+    # and the ray goes on past it, so a solid thing behind the glass still casts its shadow.
+    left, through = length(sub(LIGHT, point)), 1.0
+    for _ in range(16):
+        t, blocker = nearest(point, to_light)
+        if blocker is None or t >= left:
+            return through
+        if not blocker.ior:
+            return 0.0
+        hit = add(point, mul(to_light, t))
+        # Each ball counts once, on the way in; leaving it costs nothing more.
+        if dot(blocker.normal_at(hit), to_light) < 0:
+            through *= 0.6
+        point, left = add(hit, mul(to_light, 1e-3)), left - t - 1e-3
+    return through
+
+
 def shade(origin, direction, depth=0):
     t, obj = nearest(origin, direction)
     if obj is None:
@@ -128,13 +146,7 @@ def shade(origin, direction, depth=0):
     normal = obj.normal_at(point)
     to_light = unit(sub(LIGHT, point))
 
-    # A shadow is the same question again: does anything block the way to the light?
-    shadow_t, blocker = nearest(add(point, mul(normal, 1e-3)), to_light)
-    lit = max(0.0, dot(normal, to_light))
-    if blocker is not None and shadow_t < length(sub(LIGHT, point)):
-        # ponytail: glass lets 60% through without looking past it, so no caustics and no
-        # second blocker behind it; trace the shadow ray onward if that ever shows.
-        lit *= 0.6 if blocker.ior else 0.0
+    lit = max(0.0, dot(normal, to_light)) * light_reaching(add(point, mul(normal, 1e-3)), to_light)
 
     # Specular highlight: how closely the reflected light points back at us.
     half = unit(add(to_light, mul(direction, -1)))

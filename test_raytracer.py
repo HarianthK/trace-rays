@@ -112,6 +112,18 @@ def main():
     rt.SCENE.remove(second)
     assert abs(twice - 0.36) < 1e-9, twice
 
+    # A black mirror sphere lit from straight behind, seen dead centre: eye and light point exactly
+    # opposite, which once crashed the highlight. It shows only half the sky straight behind the eye.
+    real_scene, real_light = rt.SCENE[:], rt.LIGHT
+    rt.SCENE[:] = [rt.Sphere((0.0, 0.0, -5.0), 1.0, rt.BLACK, reflect=0.5)]
+    rt.LIGHT = (0.0, 0.0, -20.0)
+    try:
+        sky_behind = rt.shade((0.0, 0.0, 100.0), (0.0, 0.0, 1.0))
+        centre = rt.shade((0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+        assert all(abs(c - 0.5 * s) < 1e-9 for c, s in zip(centre, sky_behind)), (centre, sky_behind)
+    finally:
+        rt.SCENE[:], rt.LIGHT = real_scene, real_light
+
     # The PNG: render something tiny, then let Pillow tell us what we wrote.
     rows = rt.render(48, 27, samples=1, processes=1)
     data = rt.png(rows, 48, 27)

@@ -149,8 +149,11 @@ def shade(origin, direction, depth=0):
     lit = max(0.0, dot(normal, to_light)) * light_reaching(add(point, mul(normal, 1e-3)), to_light)
 
     # Specular highlight: how closely the reflected light points back at us.
-    half = unit(add(to_light, mul(direction, -1)))
-    highlight = mul((1.0, 1.0, 1.0), 0.4 * max(0.0, dot(normal, half)) ** 48) if lit > 0 else BLACK
+    highlight = BLACK
+    if lit > 0:
+        # Only where light lands: with the light straight behind, eye and light cancel and there is no halfway.
+        half = unit(add(to_light, mul(direction, -1)))
+        highlight = mul((1.0, 1.0, 1.0), 0.4 * max(0.0, dot(normal, half)) ** 48)
 
     if obj.ior:
         # Glass has no colour of its own: it is what it reflects plus what shows through it.

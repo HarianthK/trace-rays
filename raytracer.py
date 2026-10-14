@@ -33,6 +33,11 @@ def refract(direction, normal, eta):
     return add(mul(direction, eta), mul(normal, eta * cos_i - math.sqrt(k)))
 
 
+def schlick(cos, r0):
+    # Schlick's approximation: r0 of the light reflects head on, rising to all of it at a grazing angle.
+    return r0 + (1 - r0) * (1 - cos) ** 5
+
+
 def glass(point, direction, normal, ior):
     # The rays a glass surface sends on, each with its share of the light: a reflection,
     # and unless the angle is too steep, the rest bent through.
@@ -45,8 +50,7 @@ def glass(point, direction, normal, ior):
         return [(1.0, *reflected)]
     # Schlick's approximation of how much reflects, from the angle on the air side.
     cos = -dot(direction if entering else bent, n)
-    r0 = ((ior - 1) / (ior + 1)) ** 2
-    r = r0 + (1 - r0) * (1 - cos) ** 5
+    r = schlick(cos, ((ior - 1) / (ior + 1)) ** 2)
     return [(r, *reflected), (1 - r, add(point, mul(n, -1e-3)), unit(bent))]
 
 
@@ -168,7 +172,9 @@ def shade(origin, direction, depth=0):
     if obj.reflect > 0 and depth < 4:
         bounce = sub(direction, mul(normal, 2 * dot(direction, normal)))
         reflected = shade(add(point, mul(normal, 1e-3)), unit(bounce), depth + 1)
-        colour = add(mul(colour, 1 - obj.reflect), mul(reflected, obj.reflect))
+        # reflect is the share head on; like any real surface, more reflects at a glancing angle.
+        r = schlick(max(0.0, -dot(direction, normal)), obj.reflect)
+        colour = add(mul(colour, 1 - r), mul(reflected, r))
     return colour
 
 

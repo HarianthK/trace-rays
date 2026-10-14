@@ -112,15 +112,33 @@ def main():
     rt.SCENE.remove(second)
     assert abs(twice - 0.36) < 1e-9, twice
 
-    # A black mirror sphere lit from straight behind, seen dead centre: eye and light point exactly
-    # opposite, which once crashed the highlight. It shows only half the sky straight behind the eye.
+    # Fresnel: the head-on share at a right angle, all of it at a grazing one, and more in between.
+    assert rt.schlick(1.0, 0.25) == 0.25 and rt.schlick(0.0, 0.25) == 1.0
+    assert rt.schlick(1.0, 0.25) < rt.schlick(0.7, 0.25) < rt.schlick(0.2, 0.25) < 1.0
+    # One value worked by hand, so the formula is not only checked against itself: 0.04 + 0.96 * 0.5^5.
+    assert abs(rt.schlick(0.5, 0.04) - 0.07) < 1e-12, rt.schlick(0.5, 0.04)
+    # A black mirror sphere, lit from behind so it shows nothing of its own: hit dead centre, it is
+    # exactly its head-on share of the sky straight behind the eye; hit at its rim, nearly all sky.
     real_scene, real_light = rt.SCENE[:], rt.LIGHT
     rt.SCENE[:] = [rt.Sphere((0.0, 0.0, -5.0), 1.0, rt.BLACK, reflect=0.5)]
     rt.LIGHT = (0.0, 0.0, -20.0)
     try:
-        sky_behind = rt.shade((0.0, 0.0, 100.0), (0.0, 0.0, 1.0))
+        sky_behind = rt.shade((0.0, 0.0, 100.0), (0.0, 0.0, 1.0))  # nothing back there but sky
         centre = rt.shade((0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
         assert all(abs(c - 0.5 * s) < 1e-9 for c, s in zip(centre, sky_behind)), (centre, sky_behind)
+        # Near the rim the ray bounces off at a glancing angle, so the sky it shows is a different
+        # part of the gradient: compare with the sky along the bounce itself.
+        ray = rt.unit((0.0, 0.204, -1.0))  # the tangent is at 1 / sqrt(24), about 0.2041
+        point = rt.mul(ray, rt.SCENE[0].hit((0.0, 0.0, 0.0), ray))
+        normal = rt.SCENE[0].normal_at(point)
+        bounce = rt.unit(rt.sub(ray, rt.mul(normal, 2 * rt.dot(ray, normal))))
+        mirror = rt.SCENE.pop()
+        sky_there = rt.shade((0.0, 0.0, 0.0), bounce)
+        rt.SCENE.append(mirror)
+        share = rt.schlick(-rt.dot(ray, normal), 0.5)
+        rim = rt.shade((0.0, 0.0, 0.0), ray)
+        assert share > 0.9, share
+        assert all(abs(c - share * s) < 1e-9 for c, s in zip(rim, sky_there)), (rim, sky_there, share)
     finally:
         rt.SCENE[:], rt.LIGHT = real_scene, real_light
 

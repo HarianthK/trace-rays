@@ -139,3 +139,26 @@ behind the glass, which is exactly why the shortcut had gone unnoticed; the
 test adds a ball there to see it. What is still missing is caustics, the
 bright spot real glass focuses onto the floor, which would mean following
 light from the lamp rather than back from the eye.
+
+## Every surface is a mirror at a glancing angle
+
+The shiny spheres and the floor used to reflect a fixed share of the light,
+whatever the angle. Real surfaces do not: look along a polished floor and it
+mirrors the sky near the horizon, though straight down it barely reflects at
+all. The glass already used Schlick's approximation for this, so it moved into
+its own `schlick(cos, r0)` and every reflective surface uses it, with its
+`reflect` value now meaning the share head on. The far floor fades into the
+reflected sky and the spheres' edges turn to mirror, with no extra rays.
+
+The test is a black mirror sphere in an empty sky, lit from behind so it shows
+nothing of its own. Seen dead centre it must be exactly its head-on share of the
+sky behind the eye; seen near its rim, exactly Schlick's share of the sky along
+the bounce, over nine tenths. Both compare against `schlick` itself, which would
+pass a wrong formula, so one value is also worked by hand: 0.04 + 0.96 x 0.5^5
+is 0.07. Changing the fifth power to a fourth was caught only by that line.
+
+Writing this test turned up a crash. With the light exactly opposite the eye,
+the halfway vector for the highlight is zero, and normalising it divided by zero.
+Since the glass change it had been worked out even where no light lands; it is
+now computed only where it is used.
+

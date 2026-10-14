@@ -25,7 +25,7 @@ routine make the whole picture.
 - Ray and sphere intersection solved as a quadratic, ray and plane as one
   division, with the nearest positive hit winning.
 - Lambert shading, a Blinn-Phong highlight, shadow rays, and reflections up to
-  four bounces deep.
+  four bounces deep, stronger at a glancing angle as on any real surface.
 - Glass: Snell's law for the bend, total internal reflection when the angle
   is too steep to get out, and Schlick's approximation for how much reflects.
 - A checkered floor that is just the parity of the floored coordinates.

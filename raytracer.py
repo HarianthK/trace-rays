@@ -1,5 +1,5 @@
 # A ray tracer: spheres, glass, a checkered floor, shadows, reflections, writing its own PNG.
-# Run: python raytracer.py [-o out.png] [-w 640] [-s 2] [-p processes]. DOCS.md explains the maths.
+# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes]. DOCS.md explains the maths.
 import math
 import multiprocessing
 import os
@@ -237,7 +237,8 @@ if __name__ == "__main__":
     width = int(argv[argv.index("-w") + 1]) if "-w" in argv else 480
     samples = int(argv[argv.index("-s") + 1]) if "-s" in argv else 2
     processes = int(argv[argv.index("-p") + 1]) if "-p" in argv else None
-    height = round(width * 9 / 16)
+    # -H sets the height; without it the picture is 16:9. The camera keeps its width and fits the height.
+    height = int(argv[argv.index("-H") + 1]) if "-H" in argv else round(width * 9 / 16)
     rows = render(width, height, samples, processes)
     open(out, "wb").write(png(rows, width, height))
     print(f"{out}: {width}x{height}, {samples * samples} samples per pixel")

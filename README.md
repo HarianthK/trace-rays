@@ -8,6 +8,7 @@ glass that bends the floor upside down, and writes the PNG itself.
 
     python raytracer.py -w 640 -s 3 -o render.png        # every core but one
     python raytracer.py -w 640 -s 3 -o render.png -p 1   # one core, for comparison
+    python raytracer.py -w 400 -H 400 -o square.png      # any shape; 16:9 without -H
 
 Each row is drawn independently, so rows are shared across processes. On this
 machine's four cores the full image above takes 53 seconds instead of 151,

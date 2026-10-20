@@ -1,6 +1,7 @@
 # Run: python test_raytracer.py. The PNG is read back by Pillow, which is not our code.
 import io
 import math
+import os
 import sys
 
 import raytracer as rt
@@ -170,6 +171,20 @@ def main():
     shared = rt.png(rt.render(64, 36, samples=2, processes=3), 64, 36)
     assert shared == alone, "the parallel render differs from the single-process one"
     print("parallel render identical to the single-process one")
+
+    # -H sets the height on the command line; without it the picture stays 16:9.
+    import subprocess
+    out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")
+    try:
+        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18))):
+            subprocess.run([sys.executable, rt.__file__, *flags, "-s", "1", "-p", "1", "-o", out], check=True, capture_output=True)
+            got = Image.open(out)
+            got.load()
+            assert got.size == size, f"{flags} made {got.size}, not {size}"
+    finally:
+        if os.path.exists(out):
+            os.remove(out)
+    print("-H sets the height, and 16:9 is the default")
 
 
 # Each worker process imports this file again, so nothing may run on import alone.

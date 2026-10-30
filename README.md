@@ -1,17 +1,18 @@
 # trace-rays
 
-A ray tracer in one Python file with no dependencies. It renders spheres on a
-checkered floor with shadows, reflections, a specular highlight and a ball of
-glass that bends the floor upside down, and writes the PNG itself.
+A ray tracer in one Python file with no dependencies. It renders spheres and a
+pyramid of triangles on a checkered floor with shadows, reflections, a specular
+highlight and a ball of glass that bends the floor upside down, and writes the
+PNG itself.
 
-![Three spheres and a glass ball on a checkered floor](render.png)
+![Three spheres, a green pyramid and a glass ball on a checkered floor](render.png)
 
     python raytracer.py -w 640 -s 3 -o render.png        # every core but one
     python raytracer.py -w 640 -s 3 -o render.png -p 1   # one core, for comparison
     python raytracer.py -w 400 -H 400 -o square.png      # any shape; 16:9 without -H
 
 Each row is drawn independently, so rows are shared across processes. On this
-machine's four cores the full image above takes 53 seconds instead of 151,
+machine's four cores the full image above takes 87 seconds instead of 246,
 and the file is byte for byte the same either way. The glass ball more than
 doubled both: every ray that meets glass splits into two.
 
@@ -24,7 +25,8 @@ routine make the whole picture.
 ## What it does
 
 - Ray and sphere intersection solved as a quadratic, ray and plane as one
-  division, with the nearest positive hit winning.
+  division, ray and triangle by Moller-Trumbore, with the nearest positive hit
+  winning.
 - Lambert shading, a Blinn-Phong highlight, shadow rays, and reflections up to
   four bounces deep, stronger at a glancing angle as on any real surface.
 - Glass: Snell's law for the bend, total internal reflection when the angle
@@ -44,7 +46,8 @@ one floor point to itself with and without the sphere that shadows it, and
 hand the PNG to Pillow, which is not my code, to read back. Glass is checked
 against numbers worked out by hand: a ray half a radius off centre must come
 out of the ball turned 21.06 degrees toward the axis, and leave at the same
-30 degrees it went in.
+30 degrees it went in. Triangles are checked against a second method, plane
+first and then the three edges, on 3,000 random rays.
 
 Each check was proved able to fail by breaking one thing at a time: removing
 the occlusion test, dropping the PNG scanline filter byte, swapping the

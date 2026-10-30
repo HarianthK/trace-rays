@@ -1,4 +1,4 @@
-# A ray tracer: spheres, glass, a checkered floor, shadows, reflections, writing its own PNG.
+# A ray tracer: spheres, triangles, glass, a checkered floor, shadows, reflections, writing its own PNG.
 # Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes]. DOCS.md explains the maths.
 import math
 import multiprocessing
@@ -101,11 +101,53 @@ class Plane:
         return self.colours[odd]
 
 
+class Triangle:
+    ior = None
+
+    def __init__(self, a, b, c, colour, reflect=0.0):
+        # The normal follows the winding: counter-clockwise seen from outside points out.
+        self.a, self.e1, self.e2 = a, sub(b, a), sub(c, a)
+        self.normal, self.colour, self.reflect = unit(cross(self.e1, self.e2)), colour, reflect
+
+    def hit(self, origin, direction):
+        # Moller-Trumbore: solve origin + t*direction = a + u*e1 + v*e2 by Cramer's rule,
+        # and the point is inside when u, v and 1-u-v are all at least zero.
+        p = cross(direction, self.e2)
+        det = dot(self.e1, p)
+        if abs(det) < 1e-12:
+            return None
+        s = sub(origin, self.a)
+        u = dot(s, p) / det
+        if u < 0 or u > 1:
+            return None
+        q = cross(s, self.e1)
+        v = dot(direction, q) / det
+        if v < 0 or u + v > 1:
+            return None
+        t = dot(self.e2, q) / det
+        return t if t > 1e-4 else None
+
+    def normal_at(self, point):
+        return self.normal
+
+    def colour_at(self, point):
+        return self.colour
+
+
+def pyramid(centre, half, height, colour, reflect=0.0):
+    # Four sides on a square base; the base sits on the floor, so it is never seen.
+    x, y, z = centre
+    top = (x, y + height, z)
+    corners = [(x - half, y, z + half), (x + half, y, z + half), (x + half, y, z - half), (x - half, y, z - half)]
+    return [Triangle(corners[i], corners[(i + 1) % 4], top, colour, reflect) for i in range(4)]
+
+
 SCENE = [
     Plane(-0.5, [(0.85, 0.85, 0.88), (0.18, 0.20, 0.24)], reflect=0.15),
     Sphere((0.0, 0.3, -2.4), 0.8, (0.85, 0.25, 0.25), reflect=0.35),
     Sphere((-1.35, -0.05, -1.9), 0.45, (0.25, 0.55, 0.85), reflect=0.1),
     Sphere((1.25, 0.0, -2.0), 0.5, (0.95, 0.80, 0.30), reflect=0.6),
+    *pyramid((-0.62, -0.5, -1.5), 0.25, 0.55, (0.40, 0.75, 0.40), reflect=0.1),
     Sphere((0.35, -0.15, -1.1), 0.35, BLACK, ior=1.5),
 ]
 LIGHT = (-2.2, 3.0, 0.4)

@@ -172,6 +172,65 @@ def main():
     assert shared == alone, "the parallel render differs from the single-process one"
     print("parallel render identical to the single-process one")
 
+    # Triangles. A ray from the origin at (0.25, 0.25, -2) hits the triangle in the z=-2
+    # plane at that point; one at (0.6, 0.6, -2) is past the long edge.
+    tri = rt.Triangle((0.0, 0.0, -2.0), (1.0, 0.0, -2.0), (0.0, 1.0, -2.0), (1.0, 1.0, 1.0))
+    to = rt.unit((0.25, 0.25, -2.0))
+    assert abs(tri.hit((0.0, 0.0, 0.0), to) - rt.length((0.25, 0.25, -2.0))) < 1e-9
+    assert tri.hit((0.0, 0.0, 0.0), rt.unit((0.6, 0.6, -2.0))) is None
+    assert tri.hit((0.0, 0.0, 0.0), rt.unit((-0.1, 0.5, -2.0))) is None
+    assert tri.hit((0.0, 0.0, 0.0), rt.unit((0.5, -0.1, -2.0))) is None
+    # Behind the ray, side on, and seen from the back, which shadow rays need.
+    assert tri.hit((0.0, 0.0, 0.0), rt.mul(to, -1)) is None
+    assert tri.hit((0.0, 0.2, -2.0), (1.0, 0.0, 0.0)) is None
+    assert abs(tri.hit((0.25, 0.25, -3.0), (0.0, 0.0, 1.0)) - 1.0) < 1e-9
+    assert tri.normal_at(None) == (0.0, 0.0, 1.0)
+
+    # Random rays against another method: meet the plane, then ask whether the point is on
+    # the inner side of all three edges. Rays too close to an edge to call are skipped.
+    import random
+    rng = random.Random(7)
+
+    def point():
+        return tuple(rng.uniform(-2, 2) for _ in range(3))
+
+    hits = compared = 0
+    while compared < 3000:
+        a, b, c, origin = point(), point(), point(), point()
+        direction = rt.unit(rt.sub(rt.add(rt.mul(rt.add(a, b), 0.5), point()), origin))
+        n = rt.cross(rt.sub(b, a), rt.sub(c, a))
+        if abs(rt.dot(n, direction)) < 1e-3 * rt.length(n):
+            continue
+        t = rt.dot(n, rt.sub(a, origin)) / rt.dot(n, direction)
+        p = rt.add(origin, rt.mul(direction, t))
+        sides = [rt.dot(rt.cross(rt.sub(q, o), rt.sub(p, o)), n) / rt.length(n) / rt.length(rt.sub(q, o))
+                 for o, q in ((a, b), (b, c), (c, a))]
+        if min(abs(x) for x in sides) < 1e-6 or abs(t) < 1e-3:
+            continue
+        expected = t if t > 0 and min(sides) > 0 else None
+        got = rt.Triangle(a, b, c, rt.BLACK).hit(origin, direction)
+        assert (got is None) == (expected is None) and (got is None or abs(got - t) < 1e-6), (a, b, c, origin, direction, got, t)
+        hits += expected is not None
+        compared += 1
+    assert hits > 300, hits
+
+    # The pyramid's faces must point out, or its lit sides would shade as if facing away.
+    faces = rt.pyramid((1.0, 0.0, -3.0), 0.5, 1.0, rt.BLACK)
+    middle = (1.0, 0.25, -3.0)
+    for face in faces:
+        centroid = rt.add(face.a, rt.mul(rt.add(face.e1, face.e2), 1 / 3))
+        assert rt.dot(face.normal, rt.sub(centroid, middle)) > 0, "a face of the pyramid points inward"
+    # And the one in the scene casts a shadow, found the same way as the sphere's.
+    green = [obj for obj in rt.SCENE if isinstance(obj, rt.Triangle)]
+    behind = (-0.36, -0.4, -1.78)  # just outside the base and just above the floor, in its shadow
+    dark = floor_brightness(behind)
+    kept = list(rt.SCENE)
+    rt.SCENE[:] = [obj for obj in kept if obj not in green]
+    bright = floor_brightness(behind)
+    rt.SCENE[:] = kept
+    assert dark < bright * 0.6, f"the pyramid casts no real shadow: {dark:.3f} vs {bright:.3f}"
+    print(f"triangles: {compared} random rays agree with a second method, {hits} of them hits")
+
     # -H sets the height on the command line; without it the picture stays 16:9.
     import subprocess
     out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")

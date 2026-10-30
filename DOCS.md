@@ -162,3 +162,39 @@ the halfway vector for the highlight is zero, and normalising it divided by zero
 Since the glass change it had been worked out even where no light lands; it is
 now computed only where it is used.
 
+
+## Triangles, which is what everything else is made of
+
+Spheres are easy, but almost every real model is a mesh of triangles. A
+triangle is the points a + u*e1 + v*e2, where e1 and e2 are two of its edges,
+and the point is inside when u, v and 1-u-v are all at least zero. Setting that
+equal to the ray gives three equations in t, u and v. Moller and Trumbore's
+trick is to solve them by Cramer's rule with two cross products, and to give up
+as soon as u or v is out of range, before t is ever worked out. The plane the
+triangle lies in is never computed at all.
+
+The determinant is zero when the ray runs along the triangle's plane, so that
+is a miss. Its sign says which side the ray came from. Renderers that only draw
+closed meshes skip back faces by refusing a negative determinant, but here a
+shadow ray from the floor meets the pyramid's faces from behind, so both signs
+count. The normal comes from the winding: corners listed counter-clockwise, as
+seen from outside, give a normal that points out.
+
+The pyramid has four sides and no base, since the base sits on the floor and
+nothing can see it. It made the render 1.68 times slower, timed with and
+without it in turn in one process, because every ray now asks nine objects
+instead of five, and the full picture went from 53 seconds to 87. A mesh of
+thousands of triangles would need a bounding volume hierarchy, so that a ray
+only asks the triangles near it.
+
+The checks work the hit out by hand for one triangle, and then compare 3,000
+random rays at random triangles with a second method that meets the plane
+first and then asks whether the point is on the inner side of all three edges.
+Rays within a millionth of an edge are skipped, since the two methods may call
+those either way. Ten breakages, and nine fail it. The tenth drops the u > 1
+test, which is only an early exit: u + v > 1 rejects the same rays a step later.
+
+The pyramid's shadow check was wrong at first. It looked straight down from
+high above, like the sphere's, but that ray landed on the red sphere, and the
+difference it measured was the pyramid's reflection in it. Turning off the
+pyramid's shadow left the check passing. It now starts just above the floor.

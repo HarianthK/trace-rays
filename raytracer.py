@@ -104,10 +104,15 @@ class Plane:
 class Triangle:
     ior = None
 
-    def __init__(self, a, b, c, colour, reflect=0.0):
+    def __init__(self, a, b, c, colour, reflect=0.0, normals=None):
         # The normal follows the winding: counter-clockwise seen from outside points out.
+        # normals, one per corner, are blended across the face so a mesh looks smooth.
         self.a, self.e1, self.e2 = a, sub(b, a), sub(c, a)
         self.normal, self.colour, self.reflect = unit(cross(self.e1, self.e2)), colour, reflect
+        self.normals = normals
+        if normals:
+            d00, d01, d11 = dot(self.e1, self.e1), dot(self.e1, self.e2), dot(self.e2, self.e2)
+            self.bary = (d00, d01, d11, d00 * d11 - d01 * d01)
 
     def hit(self, origin, direction):
         # Moller-Trumbore: solve origin + t*direction = a + u*e1 + v*e2 by Cramer's rule,
@@ -128,10 +133,123 @@ class Triangle:
         return t if t > 1e-4 else None
 
     def normal_at(self, point):
-        return self.normal
+        if not self.normals:
+            return self.normal
+        # How far the point is towards b (u) and towards c (v), from the point's own position.
+        d00, d01, d11, denom = self.bary
+        w = sub(point, self.a)
+        d20, d21 = dot(w, self.e1), dot(w, self.e2)
+        u, v = (d11 * d20 - d01 * d21) / denom, (d00 * d21 - d01 * d20) / denom
+        na, nb, nc = self.normals
+        return unit(add(add(mul(na, 1 - u - v), mul(nb, u)), mul(nc, v)))
 
     def colour_at(self, point):
         return self.colour
+
+
+class Mesh:
+    # Many triangles behind one box tree (a BVH): a ray only tests the triangles in boxes it
+    # passes through. DOCS.md has how it is built and what it saves.
+    ior = None
+    LEAF = 4
+
+    def __init__(self, triangles):
+        self.triangles = triangles
+        self.root = self.build(triangles)
+
+    @staticmethod
+    def bounds(tris):
+        pts = [p for t in tris for p in (t.a, add(t.a, t.e1), add(t.a, t.e2))]
+        return tuple(min(p[i] for p in pts) for i in range(3)), tuple(max(p[i] for p in pts) for i in range(3))
+
+    def build(self, tris):
+        # Split at the median along the axis where the triangles' centres spread widest.
+        lo, hi = self.bounds(tris)
+        if len(tris) <= self.LEAF:
+            return lo, hi, tris
+        centre = lambda t, i: t.a[i] + (t.e1[i] + t.e2[i]) / 3
+        axis = max(range(3), key=lambda i: max(centre(t, i) for t in tris) - min(centre(t, i) for t in tris))
+        tris = sorted(tris, key=lambda t: centre(t, axis))
+        half = len(tris) // 2
+        return lo, hi, (self.build(tris[:half]), self.build(tris[half:]))
+
+    def closest(self, origin, direction):
+        # The nearest triangle hit and its distance. Boxes are tested by slabs: the ray is
+        # inside the box between the last plane it enters and the first it leaves.
+        inv = tuple(1 / d if d else float("inf") for d in direction)
+        best_t, best = float("inf"), None
+        stack = [self.root]
+        while stack:
+            lo, hi, kids = stack.pop()
+            near, far = 0.0, best_t
+            for i in range(3):
+                t1, t2 = (lo[i] - origin[i]) * inv[i], (hi[i] - origin[i]) * inv[i]
+                if t1 > t2:
+                    t1, t2 = t2, t1
+                near, far = max(near, t1), min(far, t2)
+                if near > far:
+                    break
+            else:
+                if isinstance(kids, tuple):
+                    stack.extend(kids)
+                    continue
+                for tri in kids:
+                    t = tri.hit(origin, direction)
+                    if t is not None and t < best_t:
+                        best_t, best = t, tri
+        return best_t, best
+
+
+def load_obj(text, colour, reflect=0.0, scale=1.0, offset=(0.0, 0.0, 0.0)):
+    # Wavefront OBJ: v and vn lines, and f lines as i, i/j, i//k or i/j/k, counted from 1 or,
+    # when negative, back from the latest. A face of more than three corners is fanned.
+    verts, norms, tris = [], [], []
+
+    def pick(table, k):
+        i = int(k)
+        if not -len(table) <= i <= len(table) or i == 0:
+            raise ValueError(f"index {i} names nothing: there are {len(table)}, counted from 1 or back from -1")
+        return table[i - 1 if i > 0 else i]
+    for number, line in enumerate(text.splitlines(), 1):
+        words = line.split("#")[0].split()
+        if not words:
+            continue
+        try:
+            if words[0] == "v":
+                verts.append(add(mul(tuple(float(w) for w in words[1:4]), scale), offset))
+            elif words[0] == "vn":
+                norms.append(unit(tuple(float(w) for w in words[1:4])))
+            elif words[0] == "f":
+                corners = []
+                for w in words[1:]:
+                    parts = w.split("/")
+                    corners.append((pick(verts, parts[0]), pick(norms, parts[2]) if len(parts) > 2 and parts[2] else None))
+                if len(corners) < 3:
+                    raise ValueError("a face needs three corners")
+                for i in range(1, len(corners) - 1):
+                    (a, na), (b, nb), (c, nc) = corners[0], corners[i], corners[i + 1]
+                    tris.append(Triangle(a, b, c, colour, reflect, (na, nb, nc) if na and nb and nc else None))
+        except ValueError as e:
+            raise ValueError(f"line {number}: {line.strip()}: {e}") from None
+    if not tris:
+        raise ValueError("no faces")
+    return Mesh(tris)
+
+
+def torus(centre, ring, tube, colour, reflect=0.0, around=32, across=16):
+    # A ring lying flat: around the ring, then around the tube, each corner with its true normal.
+    def at(i, j):
+        a, b = 2 * math.pi * i / around, 2 * math.pi * j / across
+        n = (math.cos(b) * math.cos(a), math.sin(b), math.cos(b) * math.sin(a))
+        p = add(centre, ((ring + tube * math.cos(b)) * math.cos(a), tube * math.sin(b), (ring + tube * math.cos(b)) * math.sin(a)))
+        return p, n
+    tris = []
+    for i in range(around):
+        for j in range(across):
+            (p00, n00), (p10, n10), (p01, n01), (p11, n11) = at(i, j), at(i + 1, j), at(i, j + 1), at(i + 1, j + 1)
+            tris.append(Triangle(p00, p01, p10, colour, reflect, (n00, n01, n10)))
+            tris.append(Triangle(p10, p01, p11, colour, reflect, (n10, n01, n11)))
+    return Mesh(tris)
 
 
 def pyramid(centre, half, height, colour, reflect=0.0):
@@ -148,6 +266,7 @@ SCENE = [
     Sphere((-1.35, -0.05, -1.9), 0.45, (0.25, 0.55, 0.85), reflect=0.1),
     Sphere((1.25, 0.0, -2.0), 0.5, (0.95, 0.80, 0.30), reflect=0.6),
     *pyramid((-0.62, -0.5, -1.5), 0.25, 0.55, (0.40, 0.75, 0.40), reflect=0.1),
+    torus((-0.15, -0.42, -1.0), 0.18, 0.08, (0.70, 0.45, 0.85), reflect=0.2),
     Sphere((0.35, -0.15, -1.1), 0.35, BLACK, ior=1.5),
 ]
 LIGHT = (-2.2, 3.0, 0.4)
@@ -157,7 +276,8 @@ AMBIENT = 0.12
 def nearest(origin, direction):
     best_t, best_obj = float("inf"), None
     for obj in SCENE:
-        t = obj.hit(origin, direction)
+        # A mesh answers with the triangle it hit, which is what knows its normal.
+        t, obj = obj.closest(origin, direction) if isinstance(obj, Mesh) else (obj.hit(origin, direction), obj)
         if t is not None and t < best_t:
             best_t, best_obj = t, obj
     return best_t, best_obj

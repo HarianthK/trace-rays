@@ -12,7 +12,7 @@ PNG itself.
     python raytracer.py -w 400 -H 400 -o square.png      # any shape; 16:9 without -H
 
 Each row is drawn independently, so rows are shared across processes. On this
-machine's four cores the full image above takes 87 seconds instead of 246,
+machine's four cores the full image above takes 112 seconds instead of 318,
 and the file is byte for byte the same either way. The glass ball more than
 doubled both: every ray that meets glass splits into two.
 
@@ -31,6 +31,11 @@ routine make the whole picture.
   four bounces deep, stronger at a glancing angle as on any real surface.
 - Glass: Snell's law for the bend, total internal reflection when the angle
   is too steep to get out, and Schlick's approximation for how much reflects.
+- Meshes: triangles with a normal at each corner, blended across the face so
+  a curved surface looks curved, behind a bounding volume hierarchy, so a ray
+  tests only the triangles in the boxes it passes through. `load_obj` reads
+  Wavefront OBJ files, and `torus` makes the ring in the picture, 1,024
+  triangles that cost a ray about as much as two spheres.
 - A checkered floor that is just the parity of the floored coordinates.
 - Grid supersampling, which is what removes the jagged edges.
 - sRGB gamma, without which the whole image looks muddy.

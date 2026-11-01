@@ -184,8 +184,7 @@ The pyramid has four sides and no base, since the base sits on the floor and
 nothing can see it. It made the render 1.68 times slower, timed with and
 without it in turn in one process, because every ray now asks nine objects
 instead of five, and the full picture went from 53 seconds to 87. A mesh of
-thousands of triangles would need a bounding volume hierarchy, so that a ray
-only asks the triangles near it.
+thousands of triangles needs something better, which came next.
 
 The checks work the hit out by hand for one triangle, and then compare 3,000
 random rays at random triangles with a second method that meets the plane
@@ -198,3 +197,51 @@ The pyramid's shadow check was wrong at first. It looked straight down from
 high above, like the sphere's, but that ray landed on the red sphere, and the
 difference it measured was the pyramid's reflection in it. Turning off the
 pyramid's shadow left the check passing. It now starts just above the floor.
+
+## Meshes and the box tree
+
+A ring made of 1,024 triangles, tested one by one, makes every ray ask 1,034
+objects instead of ten. A small render of the scene took 26.4 seconds that
+way against 0.28 without the ring. So a `Mesh` keeps its triangles in a tree
+of boxes, a bounding volume hierarchy: the root box holds all of them, and
+each box splits its triangles in two at the median of their centres, along
+the axis where those centres spread widest, until four or fewer are left. A
+ray tests a box by slabs: between each pair of parallel faces it is inside
+for some stretch of t, and it is inside the box where all three stretches
+overlap. Only boxes it enters are opened, and a box that starts further away
+than the nearest hit so far is not opened at all. The same render took 0.40
+seconds, 66 times faster than the loose triangles and the same picture to the
+byte; the ring costs about what two spheres do. The full 640x360 render went
+from 87 seconds to 112 on four cores, and is 318 on one, identical either way.
+
+`nearest` asks a mesh for the triangle it hit, not just how far, since the
+triangle is what knows the normal and the colour.
+
+Flat triangles make a curved surface look cut from facets. So a triangle can
+carry a normal at each corner, and the normal at a point is the three blended
+by how near the point is to each corner, worked out from the point itself:
+its barycentric weights. The ring gives each corner its true normal from the
+torus, and an OBJ file gives them on `vn` lines. The shape is still the flat
+triangles, so a shadow ray from near the edge of the lit side can meet the
+triangle beside it; at 1,024 triangles that is not visible.
+
+`load_obj` reads the parts of Wavefront OBJ that describe shape: `v` and `vn`
+lines and `f` lines, with corners written as `i`, `i/j`, `i//k` or `i/j/k`,
+counted from 1, or from the end when negative. A face of four or more corners
+is fanned into triangles from its first corner. An index of 0 or past the end
+is refused with its line, as is a face of fewer than three corners.
+
+The checks: 2,000 random rays must find, through the tree, the very triangle
+that testing all 1,024 finds; every face of the ring must be wound the way
+its corner normals point; the blended normal must be each corner's own at the
+corner and their average at the centre; a ray straight down onto the ring in
+the scene must come back with one of its triangles; and OBJ text using every
+corner form, negative indices and a quad must give triangles with exactly the
+expected corners. Seven breakages fail it: slab ends not put in order, a box
+that leaves out one corner of each triangle, the blend weights swapped, a
+negative index one off, index 0 let through, a mesh answering as itself
+rather than its triangle, and the ring wound inward. The first run missed
+two of them, because the OBJ test only shot a ray at the square, and any
+triangle in the same plane passes that; it now checks the corners. Changes
+that only make the tree slower, such as splitting on the wrong axis, were not
+counted, since every answer stays right.

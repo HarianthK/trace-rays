@@ -231,6 +231,64 @@ def main():
     assert dark < bright * 0.6, f"the pyramid casts no real shadow: {dark:.3f} vs {bright:.3f}"
     print(f"triangles: {compared} random rays agree with a second method, {hits} of them hits")
 
+    # A mesh's box tree must find the very triangle that testing every one of them finds.
+    ring = rt.torus((0.0, 0.0, -2.0), 0.5, 0.18, rt.BLACK)
+    hits = 0
+    for _ in range(2000):
+        origin = (rng.uniform(-2, 2), rng.uniform(-2, 2), rng.uniform(-0.5, 1))
+        direction = rt.unit(rt.sub((rng.uniform(-0.8, 0.8), rng.uniform(-0.3, 0.3), rng.uniform(-2.8, -1.2)), origin))
+        found = [(t, tri) for tri in ring.triangles if (t := tri.hit(origin, direction)) is not None]
+        assert ring.closest(origin, direction) == min(found, default=(float("inf"), None), key=lambda f: f[0])
+        hits += bool(found)
+    assert hits > 1000, hits
+    # Each face's winding agrees with the normals at its corners, and those blend across it:
+    # a corner's own normal at the corner, their average in the middle.
+    for tri in ring.triangles:
+        assert all(rt.dot(tri.normal, n) > 0 for n in tri.normals), "a face of the ring is wound inward"
+        b, c = rt.add(tri.a, tri.e1), rt.add(tri.a, tri.e2)
+        for corner, n in zip((tri.a, b, c), tri.normals):
+            assert max(abs(x - y) for x, y in zip(tri.normal_at(corner), n)) < 1e-9
+        middle = rt.add(tri.a, rt.mul(rt.add(tri.e1, tri.e2), 1 / 3))
+        expected = rt.unit(rt.add(rt.add(tri.normals[0], tri.normals[1]), tri.normals[2]))
+        assert max(abs(x - y) for x, y in zip(tri.normal_at(middle), expected)) < 1e-9
+    # In the scene, a ray that meets the ring is answered with one of its triangles.
+    mesh = next(obj for obj in rt.SCENE if isinstance(obj, rt.Mesh))
+    top = max(mesh.triangles, key=lambda tri: tri.a[1])  # on top of the tube, facing up
+    down = rt.add(top.a, rt.add(rt.mul(rt.add(top.e1, top.e2), 1 / 3), (0.0, 0.05, 0.0)))
+    assert rt.nearest(down, (0.0, -1.0, 0.0))[1] in mesh.triangles
+
+    # OBJ: every way a face can name its corners, negative indices, a quad fanned into two.
+    obj = """# a unit square and a triangle above it
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+vn 0 0 2
+vt 0.5 0.5
+f 1 2 3 4
+f -4/1/1 -3//1 -2/1/-1
+f 1/1 2/1 4
+"""
+    square = rt.load_obj(obj, rt.BLACK)
+    assert len(square.triangles) == 4
+    corners = lambda tri: (tri.a, rt.add(tri.a, tri.e1), rt.add(tri.a, tri.e2))
+    assert corners(square.triangles[1]) == ((0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)), "the quad was fanned wrongly"
+    assert corners(square.triangles[2]) == ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0)), "negative indices count wrongly"
+    assert square.triangles[2].normals == ((0.0, 0.0, 1.0),) * 3 and square.triangles[0].normals is None
+    assert abs(square.closest((0.75, 0.25, 1.0), (0.0, 0.0, -1.0))[0] - 1.0) < 1e-9
+    assert square.closest((1.5, 0.5, 1.0), (0.0, 0.0, -1.0))[1] is None
+    scaled = rt.load_obj(obj, rt.BLACK, scale=2.0, offset=(0.0, 0.0, -5.0))
+    assert abs(scaled.closest((1.5, 0.5, 0.0), (0.0, 0.0, -1.0))[0] - 5.0) < 1e-9
+    for broken, why in (("v 0 0 0\nf 1 2 3", "line 2: f 1 2 3: index 2 names nothing"), ("v 0 0 0\nv 1 0 0\nf 1 2", "line 3"),
+                        ("v 0 0 x", "line 1"), ("v 0 0 0", "no faces"), ("v 0 0 0\nf 1 0 1", "index 0 names nothing"),
+                        ("v 0 0 0\nf 1 1 -2", "index -2 names nothing")):
+        try:
+            rt.load_obj(broken, rt.BLACK)
+            raise AssertionError(f"{broken!r} was accepted")
+        except ValueError as e:
+            assert why in str(e), (broken, e)
+    print(f"meshes: 2000 rays find the same triangle through the box tree as without it, {hits} hits; OBJ read")
+
     # -H sets the height on the command line; without it the picture stays 16:9.
     import subprocess
     out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")

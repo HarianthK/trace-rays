@@ -2,6 +2,7 @@
 import io
 import math
 import os
+import random
 import sys
 
 import raytracer as rt
@@ -172,6 +173,44 @@ def main():
     assert shared == alone, "the parallel render differs from the single-process one"
     print("parallel render identical to the single-process one")
 
+    # Depth of field. Every ray through one pixel starts somewhere on the lens and passes the
+    # same point on the plane of focus, which is flat: 3 units ahead, not 3 units along the ray.
+    eye, ahead, right, up = (0.0, 0.0, 0.0), (0.0, 0.0, -1.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
+    slant = rt.unit((0.4, -0.3, -1.0))
+    rng = random.Random(1)
+    starts = []
+    for _ in range(500):
+        start, way = rt.lens_ray(eye, ahead, right, up, slant, 0.2, 3.0, rng)
+        assert abs(start[2]) < 1e-12 and rt.length(start) <= 0.1 + 1e-12, f"{start} is off the lens"
+        on_plane = rt.add(start, rt.mul(way, -3.0 / way[2]))
+        assert rt.length(rt.sub(on_plane, rt.mul(slant, 3.0 / -slant[2]))) < 1e-9, "the rays miss the focal point"
+        starts.append(start)
+    # Uniform over the disc, a quarter of them land inside half the radius.
+    inner = sum(rt.length(s) < 0.05 for s in starts) / len(starts)
+    assert 0.18 < inner < 0.32, f"{inner:.2f} of the lens samples are inside half its radius"
+    assert rt.lens_ray(eye, ahead, right, up, slant, 0.0, 3.0, rng) == (eye, slant), "no aperture must be a pinhole"
+
+    # A pixel just past a ball's edge sees only sky when focused on the ball, and
+    # partly the ball when focused far behind it: the edge is blurred.
+    real_scene = list(rt.SCENE)
+    try:
+        rt.SCENE[:] = [rt.Sphere((0.0, 0.0, -4.0), 1.0, rt.BLACK)]
+        edge = (math.sin(math.radians(15)), 0.0, -math.cos(math.radians(15)))  # the edge is at 14.48 degrees
+        assert rt.nearest(eye, edge)[1] is None
+        def ball_share(focus):
+            rays = [rt.lens_ray(eye, ahead, right, up, edge, 0.2, focus, rng) for _ in range(400)]
+            return sum(rt.nearest(*ray)[1] is not None for ray in rays) / len(rays)
+        sharp, blurred = ball_share(3.75), ball_share(40.0)
+        assert sharp == 0 and blurred > 0.1, (sharp, blurred)
+    finally:
+        rt.SCENE[:] = real_scene
+    # The lens draws the same picture on any number of processes, and with no aperture
+    # the picture is the pinhole one, byte for byte.
+    lens = lambda processes: rt.render(48, 27, samples=2, processes=processes, aperture=0.15, focus=1.5)
+    assert lens(1) == lens(3), "the lens render depends on how many processes drew it"
+    assert rt.png(rt.render(64, 36, samples=2, processes=3, aperture=0.0), 64, 36) == alone
+    print(f"depth of field: 500 rays meet at the focal point, an edge {blurred:.0%} blurred out of focus and sharp in it")
+
     # Triangles. A ray from the origin at (0.25, 0.25, -2) hits the triangle in the z=-2
     # plane at that point; one at (0.6, 0.6, -2) is past the long edge.
     tri = rt.Triangle((0.0, 0.0, -2.0), (1.0, 0.0, -2.0), (0.0, 1.0, -2.0), (1.0, 1.0, 1.0))
@@ -188,7 +227,6 @@ def main():
 
     # Random rays against another method: meet the plane, then ask whether the point is on
     # the inner side of all three edges. Rays too close to an edge to call are skipped.
-    import random
     rng = random.Random(7)
 
     def point():
@@ -289,11 +327,11 @@ f 1/1 2/1 4
             assert why in str(e), (broken, e)
     print(f"meshes: 2000 rays find the same triangle through the box tree as without it, {hits} hits; OBJ read")
 
-    # -H sets the height on the command line; without it the picture stays 16:9.
+    # -H sets the height on the command line; without it the picture stays 16:9. -a and -f are taken.
     import subprocess
     out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")
     try:
-        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18))):
+        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18)), (["-w", "32", "-a", "0.1", "-f", "2"], (32, 18))):
             subprocess.run([sys.executable, rt.__file__, *flags, "-s", "1", "-p", "1", "-o", out], check=True, capture_output=True)
             got = Image.open(out)
             got.load()

@@ -245,3 +245,47 @@ two of them, because the OBJ test only shot a ray at the square, and any
 triangle in the same plane passes that; it now checks the corners. Changes
 that only make the tree slower, such as splitting on the wrong axis, were not
 counted, since every answer stays right.
+
+## Depth of field is one more point on the ray
+
+Until now every ray left from a single point, the eye, which is a pinhole
+camera: everything is sharp at every distance. A real lens is a disc, and
+only one distance is in focus. A thin lens is modelled with no glass at all.
+Work out where the pinhole ray meets the plane of focus, start the ray at a
+random point on the disc instead of the eye, and aim it at that same point.
+Every ray through a pixel then meets at one point on that plane, so things
+there stay sharp, and anything nearer or further is seen from a little
+spread of places and blurs. The blur is the supersampling that was already
+there: each of a pixel's samples gets its own spot on the lens.
+
+The plane of focus is flat, at right angles to the view. Measuring the focus
+distance along each ray instead would curve it into a bowl round the eye, and
+the edges of a wall at the focus distance would blur. So the distance along
+the ray is the focus divided by the cosine to the view direction.
+
+The point on the disc is a radius times the square root of a random number.
+Without the root the points crowd towards the centre, since there is as much
+disc in the outer ring as in all of the middle; with it, a quarter of them
+land inside half the radius, as area says they should.
+
+Random numbers had to keep the parallel render byte for byte the same on any
+number of processes. Each row gets its own generator seeded with its row
+number, so a row draws the same lens points whichever process draws it and
+whenever. With no lens, `-a` 0, the generator is never read and the picture
+is the old one to the byte.
+
+Out of focus the picture is grainy at a few samples a pixel, since nine
+spots on a disc are not many; `-s 4` or more smooths it, at the usual cost.
+The 320x180 preview with `-a 0.12 -f 2.4`, sharp at the glass ball, took 88
+seconds at 16 samples a pixel on four cores. render.png is still the pinhole
+picture.
+
+The checks: 500 rays through one slanted pixel must all start on the lens
+and pass one point on a flat plane of focus; a quarter of the lens points
+must fall inside half the radius; a ray just past a ball's edge must miss it
+from every point on the lens when focused on the ball, and hit it from a
+fifth or more when focused far behind; and the lens picture must be the same
+from one process and three. Five breakages, each failing a different check:
+focus measured along the ray, the square root dropped, an unseeded
+generator, the lens tilted out of its plane, and the rays left parallel
+instead of turned to the focal point.

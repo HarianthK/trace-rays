@@ -1,8 +1,9 @@
 # A ray tracer: spheres, triangles, glass, a checkered floor, shadows, reflections, writing its own PNG.
-# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes]. DOCS.md explains the maths.
+# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes] [-a aperture] [-f focus]. DOCS.md explains the maths.
 import math
 import multiprocessing
 import os
+import random
 import struct
 import sys
 import zlib
@@ -340,10 +341,13 @@ def shade(origin, direction, depth=0):
     return colour
 
 
+EYE, TARGET = (0.8, 0.75, 1.4), (-0.1, 0.1, -2.1)
+FOCUS = length(sub(TARGET, EYE))  # sharp at the point looked at, in the red sphere, unless -f says otherwise
+
+
 def camera(width, height):
     # Off to one side, so the checker boundary at x=0 does not split the picture down the middle.
-    eye = (0.8, 0.75, 1.4)
-    target = (-0.1, 0.1, -2.1)
+    eye, target = EYE, TARGET
     forward = unit(sub(target, eye))
     right = unit(cross(forward, (0.0, 1.0, 0.0)))
     up = cross(right, forward)
@@ -351,9 +355,21 @@ def camera(width, height):
     return eye, forward, right, up, half_w, half_w * height / width
 
 
+def lens_ray(eye, forward, right, up, direction, aperture, focus, rng):
+    # A thin lens: start anywhere on a disc round the eye, aimed at where the pinhole ray meets
+    # the plane of focus, so only things at that distance stay sharp. DOCS.md has the why.
+    if not aperture:
+        return eye, direction
+    focal = add(eye, mul(direction, focus / dot(direction, forward)))
+    r, a = aperture / 2 * math.sqrt(rng.random()), 2 * math.pi * rng.random()
+    origin = add(eye, add(mul(right, r * math.cos(a)), mul(up, r * math.sin(a))))
+    return origin, unit(sub(focal, origin))
+
+
 def render_row(job):
-    y, width, height, samples = job
+    y, width, height, samples, aperture, focus = job
     eye, forward, right, up, half_w, half_h = camera(width, height)
+    rng = random.Random(y)  # seeded by row, so any number of processes draws the same picture
     row = bytearray()
     for x in range(width):
         total = BLACK
@@ -363,7 +379,7 @@ def render_row(job):
                 u = (2 * ((x + (sx + 0.5) / samples) / width) - 1) * half_w
                 v = (1 - 2 * ((y + (sy + 0.5) / samples) / height)) * half_h
                 direction = unit(add(forward, add(mul(right, u), mul(up, v))))
-                total = add(total, shade(eye, direction))
+                total = add(total, shade(*lens_ray(eye, forward, right, up, direction, aperture, focus, rng)))
         n = samples * samples
         for channel in mul(total, 1.0 / n):
             # sRGB gamma, without which everything looks too dark.
@@ -371,10 +387,11 @@ def render_row(job):
     return bytes(row)
 
 
-def render(width=480, height=270, samples=2, processes=None):
+def render(width=480, height=270, samples=2, processes=None, aperture=0.0, focus=None):
     # No pixel depends on another, so rows can be drawn in any order on any core. One
     # core is left free by default, so the machine stays usable while it renders.
-    jobs = [(y, width, height, samples) for y in range(height)]
+    focus = FOCUS if focus is None else focus
+    jobs = [(y, width, height, samples, aperture, focus) for y in range(height)]
     processes = processes or max(1, (os.cpu_count() or 2) - 1)
     if processes == 1:
         return [render_row(job) for job in jobs]
@@ -401,6 +418,11 @@ if __name__ == "__main__":
     processes = int(argv[argv.index("-p") + 1]) if "-p" in argv else None
     # -H sets the height; without it the picture is 16:9. The camera keeps its width and fits the height.
     height = int(argv[argv.index("-H") + 1]) if "-H" in argv else round(width * 9 / 16)
-    rows = render(width, height, samples, processes)
+    # -a is the lens's width in scene units (0, the default, is a pinhole); -f is how far ahead it is sharp.
+    aperture = float(argv[argv.index("-a") + 1]) if "-a" in argv else 0.0
+    focus = float(argv[argv.index("-f") + 1]) if "-f" in argv else None
+    if aperture < 0 or (focus is not None and focus <= 0):
+        sys.exit("-a must be 0 or more and -f more than 0")
+    rows = render(width, height, samples, processes, aperture, focus)
     open(out, "wb").write(png(rows, width, height))
     print(f"{out}: {width}x{height}, {samples * samples} samples per pixel")

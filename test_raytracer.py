@@ -327,11 +327,57 @@ f 1/1 2/1 4
             assert why in str(e), (broken, e)
     print(f"meshes: 2000 rays find the same triangle through the box tree as without it, {hits} hits; OBJ read")
 
-    # -H sets the height on the command line; without it the picture stays 16:9. -a and -f are taken.
+    # A round lamp, radius 1, ten units straight up; a ball halfway, off to the side. From the
+    # origin the ball hides part of the lamp's disc, so the share of rays that get through must be
+    # one minus the overlap of two circles, by the formula, not by tracing anything.
+    real = rt.SCENE[:], rt.LIGHT, rt.LIGHT_RADIUS, rt.SHADOW_RAYS, rt.rng
+    try:
+        rt.LIGHT, rt.LIGHT_RADIUS, rt.SHADOW_RAYS, rt.rng = (0.0, 10.0, 0.0), 1.0, 20000, random.Random(1)
+        up = (0.0, 1.0, 0.0)
+
+        def seen(offset, radius):
+            rt.SCENE[:] = [rt.Sphere((offset, 5.0, 0.0), radius, rt.BLACK)]
+            # The ball's shadow cone, cut by the lamp's plane: twice the offset out, this wide.
+            c, rho = 2 * offset, 10.0 * math.tan(math.asin(radius / math.hypot(offset, 5.0)))
+            R = 1.0
+            if c >= R + rho: overlap = 0.0
+            elif c <= abs(rho - R): overlap = math.pi * min(R, rho) ** 2
+            else:
+                overlap = (R * R * math.acos((c * c + R * R - rho * rho) / (2 * c * R))
+                           + rho * rho * math.acos((c * c + rho * rho - R * R) / (2 * c * rho))
+                           - 0.5 * math.sqrt((-c + R + rho) * (c + R - rho) * (c - R + rho) * (c + R + rho)))
+            return rt.lamp_share((0.0, 0.0, 0.0), up), 1 - overlap / (math.pi * R * R)
+
+        for offset, radius in ((0.4, 0.25), (0.3, 0.25), (0.55, 0.25), (0.2, 0.4)):
+            got, want = seen(offset, radius)
+            assert 0.05 < want < 0.95 and abs(got - want) < 0.02, (offset, radius, got, want)
+        # A ball big enough to hide the whole lamp leaves no light at all, and a point lamp in
+        # the first case sees straight past the ball, so its shadow there has no edge to blur.
+        assert seen(0.0, 1.0)[0] == 0.0
+        # Nothing in the way: every ray gets through, so exactly all of the lamp.
+        rt.SCENE[:] = []
+        assert rt.lamp_share((0.0, 0.0, 0.0), up) == 1.0
+        # The same first ball and lamp turned 37 degrees about z: the disc must turn to face the point.
+        w, side = (0.6, 0.8, 0.0), (0.0, 0.0, 1.0)
+        rt.LIGHT = rt.mul(w, 10.0)
+        rt.SCENE[:] = [rt.Sphere(rt.add(rt.mul(w, 5.0), rt.mul(side, 0.4)), 0.25, rt.BLACK)]
+        tilted, want = rt.lamp_share((0.0, 0.0, 0.0), w), seen(0.4, 0.25)[1]
+        assert abs(tilted - want) < 0.02, (tilted, want)
+        rt.LIGHT, rt.LIGHT_RADIUS = (0.0, 10.0, 0.0), 0.0
+        assert seen(0.4, 0.25)[0] == 1.0
+    finally:
+        rt.SCENE[:], rt.LIGHT, rt.LIGHT_RADIUS, rt.SHADOW_RAYS, rt.rng = real
+    # The radius reaches the worker processes, and the random lamp points are drawn the same in each.
+    soft = lambda processes: rt.png(rt.render(64, 36, samples=2, processes=processes, light_radius=0.4), 64, 36)
+    one = soft(1)
+    assert one == soft(3) and one != alone
+    print("soft shadows: the lamp seen past a ball matches the overlap of two circles, four ways")
+
+    # -H sets the height on the command line; without it the picture stays 16:9. -a, -f and -l are taken.
     import subprocess
     out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")
     try:
-        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18)), (["-w", "32", "-a", "0.1", "-f", "2"], (32, 18))):
+        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18)), (["-w", "32", "-a", "0.1", "-f", "2"], (32, 18)), (["-w", "32", "-l", "0.2"], (32, 18))):
             subprocess.run([sys.executable, rt.__file__, *flags, "-s", "1", "-p", "1", "-o", out], check=True, capture_output=True)
             got = Image.open(out)
             got.load()

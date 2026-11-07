@@ -289,3 +289,48 @@ from one process and three. Five breakages, each failing a different check:
 focus measured along the ray, the square root dropped, an unseeded
 generator, the lens tilted out of its plane, and the rays left parallel
 instead of turned to the focal point.
+
+## A lamp with a size
+
+A point lamp makes every shadow edge a hard line, which is the clearest sign
+that a picture was traced. A real lamp has a size, so near a shadow's edge a
+point on the floor sees part of the lamp and not the rest. That band is the
+penumbra, and the fully dark middle is the umbra.
+
+`-l` gives the lamp a radius. Instead of one shadow ray to the lamp's centre,
+each lit point sends 16 to random spots on it and counts the share that get
+through. A ball looks like a disc from every side, so the spots are drawn on
+the disc that faces the point, at right angles to the line to the centre,
+with the same square root as the lens uses to spread them evenly. Each ray is
+followed only as far as its own spot, not the centre, and glass still passes
+60% of whatever goes through it. Lambert's cosine and the highlight still use
+the centre: that is the part a small lamp barely changes.
+
+The random spots come from the same per-row generator as the lens, so the
+picture is the same on any number of cores. The radius has to travel inside
+each row's job, because a worker process on Windows starts fresh and never
+sees a global the main process set. With `-l` 0 the generator is not touched
+for shadows, and both the default picture and the lens picture come out
+identical to the byte to what they were before.
+
+Sixteen rays is not many, so the penumbra is grainy at low `-s`. Every one
+of a pixel's samples draws its own 16, which is what smooths it, at sixteen
+times the cost of the shadow rays.
+
+The check needs no picture. A lamp of radius 1 ten units straight up, and a
+ball halfway, off to one side: from the origin the ball's shadow cone cuts the
+lamp's plane in a circle, so the share of the lamp that is visible is one
+minus the overlap of two circles, which has a closed formula. With 20,000
+rays the traced share must land within 0.02 of it, for four balls. A ball big
+enough to hide the whole lamp must give exactly 0, an empty scene exactly 1,
+and the point lamp must see straight past the first ball. The first case is
+then turned 37 degrees and must give the same share, and the soft render must
+be the same from one process and from three.
+
+Seven breakages; six fail the check. The first version of the check missed two of
+them. Dividing by one ray too many moves the answer by 1 in 20,000, so only the
+empty scene's exact 1 catches it. A disc left lying flat instead of facing the
+point looks identical from straight below, so the lamp had to be tilted to
+catch that. The one still missed measures each shadow ray only as far as the
+lamp's centre instead of its own spot on the disc. That differs only for
+something inside the lamp itself, and the scene puts nothing there.

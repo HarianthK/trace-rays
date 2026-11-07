@@ -1,5 +1,5 @@
 # A ray tracer: spheres, triangles, glass, a checkered floor, shadows, reflections, writing its own PNG.
-# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes] [-a aperture] [-f focus]. DOCS.md explains the maths.
+# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes] [-a aperture] [-f focus] [-l lamp radius]. DOCS.md explains the maths.
 import math
 import multiprocessing
 import os
@@ -272,6 +272,9 @@ SCENE = [
 ]
 LIGHT = (-2.2, 3.0, 0.4)
 AMBIENT = 0.12
+# -l: the lamp's radius. 0 is a point, with hard shadows; bigger blurs their edges, SHADOW_RAYS rays a point.
+LIGHT_RADIUS, SHADOW_RAYS = 0.0, 16
+rng = random.Random(0)  # render_row reseeds it per row, so the picture is the same on any number of cores
 
 
 def nearest(origin, direction):
@@ -284,10 +287,10 @@ def nearest(origin, direction):
     return best_t, best_obj
 
 
-def light_reaching(point, to_light):
+def light_reaching(point, to_light, light=None):
     # A shadow is the same question again: what is in the way to the light? Glass passes 60%
     # and the ray goes on past it, so a solid thing behind the glass still casts its shadow.
-    left, through = length(sub(LIGHT, point)), 1.0
+    left, through = length(sub(light or LIGHT, point)), 1.0
     for _ in range(16):
         t, blocker = nearest(point, to_light)
         if blocker is None or t >= left:
@@ -302,6 +305,21 @@ def light_reaching(point, to_light):
     return through
 
 
+def lamp_share(point, to_light):
+    # How much of the lamp the point sees. A round lamp looks like a disc from anywhere, so the
+    # shadow rays go to random points on the disc facing the point. DOCS.md has the penumbra.
+    if not LIGHT_RADIUS:
+        return light_reaching(point, to_light)
+    side = unit(cross(to_light, (0.0, 1.0, 0.0) if abs(to_light[1]) < 0.9 else (1.0, 0.0, 0.0)))
+    other = cross(to_light, side)
+    total = 0.0
+    for _ in range(SHADOW_RAYS):
+        r, a = LIGHT_RADIUS * math.sqrt(rng.random()), 2 * math.pi * rng.random()
+        spot = add(LIGHT, add(mul(side, r * math.cos(a)), mul(other, r * math.sin(a))))
+        total += light_reaching(point, unit(sub(spot, point)), spot)
+    return total / SHADOW_RAYS
+
+
 def shade(origin, direction, depth=0):
     t, obj = nearest(origin, direction)
     if obj is None:
@@ -313,7 +331,7 @@ def shade(origin, direction, depth=0):
     normal = obj.normal_at(point)
     to_light = unit(sub(LIGHT, point))
 
-    lit = max(0.0, dot(normal, to_light)) * light_reaching(add(point, mul(normal, 1e-3)), to_light)
+    lit = max(0.0, dot(normal, to_light)) * lamp_share(add(point, mul(normal, 1e-3)), to_light)
 
     # Specular highlight: how closely the reflected light points back at us.
     highlight = BLACK
@@ -367,7 +385,8 @@ def lens_ray(eye, forward, right, up, direction, aperture, focus, rng):
 
 
 def render_row(job):
-    y, width, height, samples, aperture, focus = job
+    global rng, LIGHT_RADIUS
+    y, width, height, samples, aperture, focus, LIGHT_RADIUS = job
     eye, forward, right, up, half_w, half_h = camera(width, height)
     rng = random.Random(y)  # seeded by row, so any number of processes draws the same picture
     row = bytearray()
@@ -387,11 +406,11 @@ def render_row(job):
     return bytes(row)
 
 
-def render(width=480, height=270, samples=2, processes=None, aperture=0.0, focus=None):
+def render(width=480, height=270, samples=2, processes=None, aperture=0.0, focus=None, light_radius=0.0):
     # No pixel depends on another, so rows can be drawn in any order on any core. One
     # core is left free by default, so the machine stays usable while it renders.
     focus = FOCUS if focus is None else focus
-    jobs = [(y, width, height, samples, aperture, focus) for y in range(height)]
+    jobs = [(y, width, height, samples, aperture, focus, light_radius) for y in range(height)]
     processes = processes or max(1, (os.cpu_count() or 2) - 1)
     if processes == 1:
         return [render_row(job) for job in jobs]
@@ -421,8 +440,9 @@ if __name__ == "__main__":
     # -a is the lens's width in scene units (0, the default, is a pinhole); -f is how far ahead it is sharp.
     aperture = float(argv[argv.index("-a") + 1]) if "-a" in argv else 0.0
     focus = float(argv[argv.index("-f") + 1]) if "-f" in argv else None
-    if aperture < 0 or (focus is not None and focus <= 0):
-        sys.exit("-a must be 0 or more and -f more than 0")
-    rows = render(width, height, samples, processes, aperture, focus)
+    light_radius = float(argv[argv.index("-l") + 1]) if "-l" in argv else 0.0
+    if aperture < 0 or light_radius < 0 or (focus is not None and focus <= 0):
+        sys.exit("-a and -l must be 0 or more and -f more than 0")
+    rows = render(width, height, samples, processes, aperture, focus, light_radius)
     open(out, "wb").write(png(rows, width, height))
     print(f"{out}: {width}x{height}, {samples * samples} samples per pixel")

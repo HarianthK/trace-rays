@@ -11,6 +11,7 @@ PNG itself.
     python raytracer.py -w 640 -s 3 -o render.png -p 1   # one core, for comparison
     python raytracer.py -w 400 -H 400 -o square.png      # any shape; 16:9 without -H
     python raytracer.py -w 320 -s 4 -a 0.12 -f 2.4       # a lens: sharp 2.4 units ahead, blurred elsewhere
+    python raytracer.py -w 320 -s 3 -l 0.6               # a lamp of radius 0.6: soft shadows
 
 Each row is drawn independently, so rows are shared across processes. On this
 machine's four cores the full image above takes 112 seconds instead of 318,
@@ -40,6 +41,10 @@ routine make the whole picture.
 - Depth of field: `-a` gives the camera a lens that wide, and `-f` says how
   far ahead it is sharp (by default, the point the camera looks at). Nearer and
   further things blur. The default, no lens, draws the picture above unchanged.
+- Soft shadows: `-l` gives the lamp a radius, and each lit point sends 16
+  shadow rays to random spots on it, so a shadow is dark in the middle and
+  fades at its edge, where only part of the lamp is hidden. The default, a
+  point lamp, again leaves the picture as it was.
 - A checkered floor that is just the parity of the floored coordinates.
 - Grid supersampling, which is what removes the jagged edges.
 - sRGB gamma, without which the whole image looks muddy.

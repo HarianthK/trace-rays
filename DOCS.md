@@ -334,3 +334,42 @@ point looks identical from straight below, so the lamp had to be tilted to
 catch that. The one still missed measures each shadow ray only as far as the
 lamp's centre instead of its own spot on the disc. That differs only for
 something inside the lamp itself, and the scene puts nothing there.
+
+## Coloured glass gets deeper where it is thicker
+
+Clear glass bends light but keeps all of it. Coloured glass also soaks some up,
+and the further light travels through it the more it loses. Beer-Lambert's law
+says by how much: after a distance d, a share exp(-a d) of each colour is left,
+where a is how strongly the glass absorbs that colour. Green glass absorbs red
+and blue strongly and green hardly at all.
+
+That needs only one change, because a ray inside the glass is already traced on
+its own. When shade follows a ray from inside the ball to the far wall, t is
+exactly the distance it crossed, so the colour it brings back is multiplied by
+exp(-a t), channel by channel. A ray that bounces around inside is several such
+crossings, and each is charged for its own length. The thick middle of the ball
+comes out deep and the thin rim pale, with no special case for either.
+
+`-g R,G,B` sets a for the ball in the scene, as in `-g 1.5,0.1,1.5` for green.
+The default stays clear and draws the picture above unchanged. The shadow is
+still grey: shadow rays carry one number, not a colour, and a tinted shadow
+would need them to carry three.
+
+The check works the answer out by hand rather than by tracing. From the ball's
+centre, looking level, the light leaves after one radius; head on, 4% reflects
+back in and leaves after two more radii, and so on. That makes the share kept a
+short series in 0.04 and exp(-a r), which the traced answer must match within
+1e-4 for three sizes of ball, while a channel with a = 0 must not change at all.
+From outside through the middle, the 4% reflected off the front is never
+tinted, and the rest leaves after one width, two, three. That ratio is checked
+within 5e-4, since each ray starts 1e-3 off the surface and crosses that much
+less glass. The lamp is moved straight below for it, because a highlight on the
+glass is not light let through.
+
+Six breakages; all six fail the check. The first draft of the check missed the
+flag being dropped on the command line, because it looked only at the picture's
+size. It now also checks that the picture changes. The first bound was also
+wrong: looking straight up from the centre, the 4% that bounces back in comes
+out facing the white part of the sky, which is brighter in red than the blue
+part overhead, so the share was not simply exp(-a r). Looking level puts the
+same sky on both sides.

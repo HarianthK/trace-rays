@@ -12,6 +12,7 @@ PNG itself.
     python raytracer.py -w 400 -H 400 -o square.png      # any shape; 16:9 without -H
     python raytracer.py -w 320 -s 4 -a 0.12 -f 2.4       # a lens: sharp 2.4 units ahead, blurred elsewhere
     python raytracer.py -w 320 -s 3 -l 0.6               # a lamp of radius 0.6: soft shadows
+    python raytracer.py -w 320 -s 3 -g 1.5,0.1,1.5       # green glass, deeper where it is thicker
 
 Each row is drawn independently, so rows are shared across processes. On this
 machine's four cores the full image above takes 112 seconds instead of 318,
@@ -45,6 +46,9 @@ routine make the whole picture.
   shadow rays to random spots on it, so a shadow is dark in the middle and
   fades at its edge, where only part of the lamp is hidden. The default, a
   point lamp, again leaves the picture as it was.
+- Coloured glass: `-g` says how much red, green and blue the glass ball soaks
+  up per unit, and Beer-Lambert's law takes that much more the further light
+  travels inside, so the thick middle is deep and the rim pale.
 - A checkered floor that is just the parity of the floored coordinates.
 - Grid supersampling, which is what removes the jagged edges.
 - sRGB gamma, without which the whole image looks muddy.

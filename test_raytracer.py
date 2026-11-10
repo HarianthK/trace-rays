@@ -373,15 +373,49 @@ f 1/1 2/1 4
     assert one == soft(3) and one != alone
     print("soft shadows: the lamp seen past a ball matches the overlap of two circles, four ways")
 
-    # -H sets the height on the command line; without it the picture stays 16:9. -a, -f and -l are taken.
+    # Tinted glass: from a ball's centre, level, the light crosses one radius to get out. Head on, 4% reflects
+    # back in each time and leaves after two more radii, so Beer-Lambert keeps sum 0.04^k exp(-a(2k+1)r) of sum 0.04^k.
+    kept = lambda a, r: sum(0.04 ** k * math.exp(-a * (2 * k + 1) * r) for k in range(4)) / sum(0.04 ** k for k in range(4))
+    real = rt.SCENE[:], rt.LIGHT
+    try:
+        for radius in (0.5, 1.0, 2.0):
+            rt.SCENE[:] = [rt.Sphere((0.0, 0.0, 0.0), radius, rt.BLACK, ior=1.5)]
+            clear = rt.shade((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+            rt.SCENE[0].absorb = (1.0, 0.0, 0.25)
+            tinted = rt.shade((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+            assert tinted[1] == clear[1], "a channel that absorbs nothing changed"
+            for got, want in ((tinted[0] / clear[0], kept(1.0, radius)), (tinted[2] / clear[2], kept(0.25, radius))):
+                assert abs(got - want) < 1e-4, (radius, got, want)
+        # From outside, through the middle: 4% reflects off the front untinted, and the rest leaves
+        # after crossing the width once, twice (back out the front), and so on, each width keeping T of the red.
+        whole = lambda t: 0.04 + 0.96 * sum(0.04 ** k * 0.96 * t ** (k + 1) for k in range(4))
+        # The lamp goes straight below, so neither face has a highlight, which is not light let through.
+        rt.SCENE[:], rt.LIGHT = [rt.Sphere((0.0, 0.0, -3.0), 1.0, rt.BLACK, ior=1.5, absorb=(0.5, 0.0, 0.0))], (0.0, -100.0, -3.0)
+        through = rt.shade((0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+        rt.SCENE[0].absorb = None
+        got = through[0] / rt.shade((0.0, 0.0, 0.0), (0.0, 0.0, -1.0))[0]
+        # Within 5e-4: each ray starts 1e-3 off the surface, so it crosses a hair less glass.
+        assert abs(got - whole(math.exp(-0.5 * 2.0)) / whole(1.0)) < 5e-4, got
+    finally:
+        rt.SCENE[:], rt.LIGHT = real
+    # -g reaches the worker processes, and no tint leaves the picture as it was.
+    tinted = lambda processes: rt.png(rt.render(48, 27, samples=1, processes=processes, tint=(0.0, 2.0, 2.0)), 48, 27)
+    assert tinted(1) == tinted(3) != rt.png(rt.render(48, 27, samples=1, processes=1), 48, 27)
+    assert rt.render(48, 27, samples=1, processes=1) == rt.render(48, 27, samples=1, processes=1, tint=(0.0, 0.0, 0.0))
+    print("tinted glass: each channel fades as exp(-absorb * distance), through a radius or a whole ball")
+
+    # -H sets the height on the command line; without it the picture stays 16:9. -a, -f, -l and -g are taken.
     import subprocess
     out = os.path.join(os.path.dirname(os.path.abspath(rt.__file__)), "t-size.png")
+    pictures = {}
     try:
-        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18)), (["-w", "32", "-a", "0.1", "-f", "2"], (32, 18)), (["-w", "32", "-l", "0.2"], (32, 18))):
+        for flags, size in ((["-w", "40", "-H", "30"], (40, 30)), (["-w", "32"], (32, 18)), (["-w", "32", "-a", "0.1", "-f", "2"], (32, 18)), (["-w", "32", "-l", "0.2"], (32, 18)), (["-w", "32", "-g", "0,1,1"], (32, 18))):
             subprocess.run([sys.executable, rt.__file__, *flags, "-s", "1", "-p", "1", "-o", out], check=True, capture_output=True)
             got = Image.open(out)
             got.load()
             assert got.size == size, f"{flags} made {got.size}, not {size}"
+            pictures[" ".join(flags)] = open(out, "rb").read()
+        assert pictures["-w 32 -g 0,1,1"] != pictures["-w 32"], "-g left the glass clear"
     finally:
         if os.path.exists(out):
             os.remove(out)

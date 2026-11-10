@@ -1,5 +1,5 @@
 # A ray tracer: spheres, triangles, glass, a checkered floor, shadows, reflections, writing its own PNG.
-# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes] [-a aperture] [-f focus] [-l lamp radius]. DOCS.md explains the maths.
+# Run: python raytracer.py [-o out.png] [-w 640] [-H 360] [-s 2] [-p processes] [-a aperture] [-f focus] [-l lamp radius] [-g R,G,B glass tint]. DOCS.md explains the maths.
 import math
 import multiprocessing
 import os
@@ -56,9 +56,10 @@ def glass(point, direction, normal, ior):
 
 
 class Sphere:
-    def __init__(self, centre, radius, colour, reflect=0.0, ior=None):
+    def __init__(self, centre, radius, colour, reflect=0.0, ior=None, absorb=None):
         self.centre, self.radius, self.colour, self.reflect = centre, radius, colour, reflect
         self.ior = ior  # index of refraction; set, the sphere is clear glass
+        self.absorb = absorb  # glass only: how much red, green and blue it soaks up per unit crossed
 
     def hit(self, origin, direction):
         # |origin + t*direction - centre| = radius, solved as a quadratic in t.
@@ -268,7 +269,7 @@ SCENE = [
     Sphere((1.25, 0.0, -2.0), 0.5, (0.95, 0.80, 0.30), reflect=0.6),
     *pyramid((-0.62, -0.5, -1.5), 0.25, 0.55, (0.40, 0.75, 0.40), reflect=0.1),
     torus((-0.15, -0.42, -1.0), 0.18, 0.08, (0.70, 0.45, 0.85), reflect=0.2),
-    Sphere((0.35, -0.15, -1.1), 0.35, BLACK, ior=1.5),
+    GLASS := Sphere((0.35, -0.15, -1.1), 0.35, BLACK, ior=1.5),
 ]
 LIGHT = (-2.2, 3.0, 0.4)
 AMBIENT = 0.12
@@ -346,6 +347,9 @@ def shade(origin, direction, depth=0):
         if depth < 6:
             for weight, start, way in glass(point, direction, normal, obj.ior):
                 colour = add(colour, mul(shade(start, way, depth + 1), weight))
+        if obj.absorb and dot(direction, normal) > 0:
+            # This ray crossed t of the glass to get out; Beer-Lambert keeps exp(-absorb * t) of each channel.
+            colour = tuple(c * math.exp(-a * t) for c, a in zip(colour, obj.absorb))
         return colour
 
     colour = add(mul(obj.colour_at(point), AMBIENT + lit), highlight)
@@ -386,7 +390,7 @@ def lens_ray(eye, forward, right, up, direction, aperture, focus, rng):
 
 def render_row(job):
     global rng, LIGHT_RADIUS
-    y, width, height, samples, aperture, focus, LIGHT_RADIUS = job
+    y, width, height, samples, aperture, focus, LIGHT_RADIUS, GLASS.absorb = job
     eye, forward, right, up, half_w, half_h = camera(width, height)
     rng = random.Random(y)  # seeded by row, so any number of processes draws the same picture
     row = bytearray()
@@ -406,11 +410,11 @@ def render_row(job):
     return bytes(row)
 
 
-def render(width=480, height=270, samples=2, processes=None, aperture=0.0, focus=None, light_radius=0.0):
+def render(width=480, height=270, samples=2, processes=None, aperture=0.0, focus=None, light_radius=0.0, tint=None):
     # No pixel depends on another, so rows can be drawn in any order on any core. One
     # core is left free by default, so the machine stays usable while it renders.
     focus = FOCUS if focus is None else focus
-    jobs = [(y, width, height, samples, aperture, focus, light_radius) for y in range(height)]
+    jobs = [(y, width, height, samples, aperture, focus, light_radius, tint) for y in range(height)]
     processes = processes or max(1, (os.cpu_count() or 2) - 1)
     if processes == 1:
         return [render_row(job) for job in jobs]
@@ -441,8 +445,12 @@ if __name__ == "__main__":
     aperture = float(argv[argv.index("-a") + 1]) if "-a" in argv else 0.0
     focus = float(argv[argv.index("-f") + 1]) if "-f" in argv else None
     light_radius = float(argv[argv.index("-l") + 1]) if "-l" in argv else 0.0
+    # -g R,G,B tints the glass ball: what it soaks up of each per unit crossed, so thick parts are deeper.
+    tint = tuple(float(v) for v in argv[argv.index("-g") + 1].split(",")) if "-g" in argv else None
+    if tint and (len(tint) != 3 or min(tint) < 0):
+        sys.exit("-g takes three numbers, 0 or more, as in -g 0,1.5,2")
     if aperture < 0 or light_radius < 0 or (focus is not None and focus <= 0):
         sys.exit("-a and -l must be 0 or more and -f more than 0")
-    rows = render(width, height, samples, processes, aperture, focus, light_radius)
+    rows = render(width, height, samples, processes, aperture, focus, light_radius, tint)
     open(out, "wb").write(png(rows, width, height))
     print(f"{out}: {width}x{height}, {samples * samples} samples per pixel")
